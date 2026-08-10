@@ -295,7 +295,7 @@ def handle_sav(path: Path):
     print(f"    {GREY}user_id used:{RESET} {user_id}")
 
     out_path = path.with_suffix('.json')
-    out_path.write_text(json.dumps(parsed, indent=2, ensure_ascii=False))
+    out_path.write_text(json.dumps(parsed, indent=2, ensure_ascii=False), encoding='utf-8')
     ok(f"Decrypted {len(parsed)} fields -> {out_path}")
 
 
