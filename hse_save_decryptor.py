@@ -232,7 +232,7 @@ def decrypt_save(raw: bytes, user_id: str):
     return header, parsed
 
 
-def encrypt_save(parsed, user_id: str, device_name="Device", version=1, progress=0):
+def encrypt_save(parsed, user_id: str, device_name="Device", version=1, progress=0, modified_time=None):
     text = json.dumps(parsed, ensure_ascii=False)
     compressed = lzf_compress(text.encode('utf-8'))
 
@@ -245,8 +245,9 @@ def encrypt_save(parsed, user_id: str, device_name="Device", version=1, progress
     cipher = AES.new(key, AES.MODE_CBC, iv)
     ciphertext = cipher.encrypt(padded)
 
-    md5_hash = hashlib.md5(ciphertext).hexdigest()
-    modified_time = int(time.time())
+    md5_hash = hashlib.md5(ciphertext).hexdigest().upper()
+    if modified_time is None:
+        modified_time = int(time.time())
 
     header = build_header(
         version=version,
@@ -298,12 +299,38 @@ def handle_sav(path: Path):
     out_path.write_text(json.dumps(parsed, indent=2, ensure_ascii=False), encoding='utf-8')
     ok(f"Decrypted {len(parsed)} fields -> {out_path}")
 
+    header_path = path.with_suffix('.header.json')
+    header_sidecar = {
+        'version': header['version'],
+        'modified_time': header['modified_time'],
+        'progress': header['progress'],
+        'device_name': header['device_name'],
+    }
+    header_path.write_text(json.dumps(header_sidecar, indent=2), encoding='utf-8')
+    ok(f"Saved original header (for re-encrypting later) -> {header_path}")
+
 
 def handle_json(path: Path):
     info("Detected .json file -> encrypting")
     parsed = json.loads(path.read_text(encoding='utf-8'))
     user_id = path.stem
-    data = encrypt_save(parsed, user_id)
+
+    header_path = path.with_suffix('.header.json')
+    if header_path.exists():
+        saved_header = json.loads(header_path.read_text(encoding='utf-8'))
+        info(f"Found original header at {header_path} -- reusing its modified_time/version/progress/device_name")
+        data = encrypt_save(
+            parsed, user_id,
+            device_name=saved_header.get('device_name', 'Device'),
+            version=saved_header.get('version', 1),
+            progress=saved_header.get('progress', 0),
+            modified_time=saved_header.get('modified_time'),
+        )
+    else:
+        warn(f"No {header_path.name} found next to this file -- stamping a fresh modified_time. "
+             "If this content came from a real save, the game may reject it as tampered/rolled back.")
+        data = encrypt_save(parsed, user_id)
+
     out_path = path.with_name(f"{user_id}.sav")
     out_path.write_bytes(data)
     ok(f"Encrypted {len(parsed)} fields -> {out_path}")
